@@ -1,6 +1,23 @@
+*~
+*.swp
 *.class
+bin/
+target/
+target-ide/
+.settings/
+.project
+.classpath
+.idea
+*.iml
 
 # Package Files #
 *.jar
 *.war
 *.ear
+
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+
+.clover/
+*.jdproj
