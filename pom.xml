@@ -49,11 +49,13 @@
             <version>1.4.0-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
+        <!-- 
         <dependency>
             <groupId>org.datanucleus</groupId>
             <artifactId>datanucleus-core</artifactId>
             <version>3.2.12-SNAPSHOT</version>
         </dependency>
+         -->
     </dependencies>
 
     <repositories>

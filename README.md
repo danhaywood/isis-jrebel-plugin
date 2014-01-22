@@ -1,17 +1,35 @@
 isis-jrebel-plugin
 ==================
 
-Apache Isis plugin for JRebel.
+This is a plugin for [Apache Isis](http://isis.apache.org) plugin for [JRebel](http://zeroturnaround.com/software/jrebel/).  By configuring it you can develop your Isis application without having to restart the application.
+
+This plugin assumes you are using the Isis with the JDO (DataNucleus) objectstore.
+
+## Usage notes
 
 
-## Prereqs
+In general you can change any domain object or service.  However, be aware that:
 
-First, install JRebel into Eclipse.
+* the enhancement of the domain class is still done by the IDE plugin.
 
-Second, check out the source code for this project, and compile
+* the changed class is only reloaded when you next interact with the app
 
-- nb: against 1.4.0-SNAPSHOT of Isis
-- nb: currently against 3.1.12-SNAPSHOT of DN-core
+* on occasion you may get an exception on the interaction that causes the domain class(es) to reload.  This is caused by a temporary mismatch between the loaded class and the JDO metadata.  Just ignore the exception and carry on.
+
+* new properties of persistent domain objects must be marked as optional (`@Column(allowNulls="true")`
+  * it might be possible to specify a JDO [default](http://www.datanucleus.org/products/accessplatform_3_2/jdo/orm/schema_mapping.html#nullsdefaults) [clause](http://www.datanucleus.org/products/accessplatform_3_2/jdo/annotations.html#Column) to circumvent this; not yet tested.
+
+
+## Prerequisites
+
+* install JRebel into Eclipse.
+   * this plugin has not been tested against other IDEs, but might well work...
+
+* grab out the [Isis source code](http://github.com/apache/isis) (`1.4.0-SNAPSHOT`), and compile
+   * as described on the [Isis website](http://isis.apache.org/contributors/building-isis.html)
+
+* check out the source code for this project, and compile
+
 
 Locate the `danhaywood-isis-jrebel-plugin-1.0.0-SNAPSHOT.jar` JAR file (in `target` folder).
 

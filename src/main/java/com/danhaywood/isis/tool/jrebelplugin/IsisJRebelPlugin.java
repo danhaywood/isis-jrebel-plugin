@@ -171,12 +171,12 @@ public class IsisJRebelPlugin implements Plugin {
                     // (ie the other branch of this if statement)
                     bytecodeByClassName.put(className, bytecode);
 
-                    discardJdoMetadata(className, bytecode);
+                    log("      forcing recreation of PMF next time");
+                    DataNucleusApplicationComponents.markAsStale();
                 }
 
                 return bytecode;
             }
-
 
         };
     }
@@ -229,30 +229,6 @@ public class IsisJRebelPlugin implements Plugin {
         return ctClass;
     }
     
-    // we invalidate the metadata for the remainder of this call, then
-    // tell Isis to recreate the PMF lazily next time.
-    // (as good as we can do?)
-    private static void discardJdoMetadata(String className, byte[] bytecode) {
-        
-        log("      discarding existing JDO metadata: " + className);
-        MetaDataManager metaDataManager = DataNucleusApplicationComponents.getMetaDataManager();
-        if (metaDataManager != null) {
-            log("        unloading metadata");
-            try {
-                metaDataManager.unloadMetaDataForClass(className);
-            } catch(Exception ignore) {
-                // sometimes get a LinkageError here, some sort of race condition?
-                // have decided not to care about it, since we recreate the PMF anyway next time round
-                log("          exception thrown, ignoring: " + ignore.getMessage());
-            }
-        } else {
-            log("        DataNucleus not yet instantiated, so skipping");
-        }
-        
-        log("      forcing PMF to recreate next time");
-        DataNucleusApplicationComponents.markAsStale();
-    }
-
     private ClassEventListener newClassLoadListener() {
         return new ClassEventListener() {
 
