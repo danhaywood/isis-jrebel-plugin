@@ -1,20 +1,21 @@
 isis-jrebel-plugin
 ==================
 
-This is a plugin for [Apache Isis](http://isis.apache.org) plugin for [JRebel](http://zeroturnaround.com/software/jrebel/).  By configuring it you can develop your Isis application without having to restart the application.
+This is a plugin for [Apache Isis](http://isis.apache.org) plugin for [JRebel](http://zeroturnaround.com/software/jrebel/).  By configuring it you can develop your Isis application without having to restart the app.
 
-This plugin assumes you are using the Isis with the JDO (DataNucleus) objectstore.
+This plugin assumes you are using the Isis with the [JDO (DataNucleus) objectstore](http://isis.apache.org/components/objectstores/jdo/about.html), and either the [Wicket viewer](http://isis.apache.org/components/viewers/wicket/about.html) or the [Restful Objects viewer](http://isis.apache.org/components/viewers/restfulobjects/about.html).
 
 ## Usage notes
 
+In general you can change any domain class (entity or service) and those changes will be reflected when you next interact with the app.  That means you can change Isis annotations, add or remove methods, refactor methods, even add or remove properties and relationships, and those changes will be picked up without having to stop and start the app.
 
-In general you can change any domain object or service.  However, be aware that:
+However, do be aware that:
 
-* the enhancement of the domain class is still done by the IDE plugin.
+* the enhancement of the domain class must be done by the IDE plugin.
 
-* the changed class is only reloaded when you next interact with the app
+* the changed class is only reloaded when you next interact with the app (the plugin writes the stderr, so you won't necessarily see a change immediately on compile).
 
-* on occasion you may get an exception on the interaction that causes the domain class(es) to reload.  This is caused by a temporary mismatch between the loaded class and the JDO metadata.  Just ignore the exception and carry on.
+* on occasion when using your app you may get an exception on the interaction that causes the domain class(es) to reload.  This is caused by a temporary mismatch between the loaded class and the JDO metadata.  However, things should correct themselves for the subsequent requests, so you can simply ignore the exception and carry on.
 
 * new properties of persistent domain objects must be marked as optional (`@Column(allowNulls="true")`
   * it might be possible to specify a JDO [default](http://www.datanucleus.org/products/accessplatform_3_2/jdo/orm/schema_mapping.html#nullsdefaults) [clause](http://www.datanucleus.org/products/accessplatform_3_2/jdo/annotations.html#Column) to circumvent this; not yet tested.
@@ -25,8 +26,9 @@ In general you can change any domain object or service.  However, be aware that:
 * install JRebel into Eclipse.
    * this plugin has not been tested against other IDEs, but might well work...
 
-* grab out the [Isis source code](http://github.com/apache/isis) (`1.4.0-SNAPSHOT`), and compile
+* at the time of writing, Isis 1.4.0 hasn't been released, so grab the [Isis source code](http://github.com/apache/isis) (`1.4.0-SNAPSHOT`), and compile
    * as described on the [Isis website](http://isis.apache.org/contributors/building-isis.html)
+   * you won't need to do this once Isis 1.4.0 is out there
 
 * check out the source code for this project, and compile
 
@@ -36,7 +38,9 @@ Locate the `danhaywood-isis-jrebel-plugin-1.0.0-SNAPSHOT.jar` JAR file (in `targ
 
 ## Configure projects in Eclipse
 
-to configure, *Help>JRebel Config Center*, then select the `dom` project (and probably the `webapp` project too):
+> The appropriate changes have been made to the "simple app" (with a hard-coded location for the JAR file.  This will be part of the next archetype when 1.4.0 of Isis is released).
+
+To configure, use *Help>JRebel Config Center*, then select the `dom` project (and probably the `webapp` project too):
 
 ![](https://raw2.github.com/danhaywood/isis-jrebel-plugin/master/docs/images/eclipse-jrebel-config-center.png)
 

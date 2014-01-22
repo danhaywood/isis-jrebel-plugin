@@ -171,6 +171,10 @@ public class IsisJRebelPlugin implements Plugin {
                     // (ie the other branch of this if statement)
                     bytecodeByClassName.put(className, bytecode);
 
+                    // throw away existing PMF
+                    // it's possible that the user will get an exception due to the mismatch
+                    // between the enhanced class and the existing metadata; but this is transient.
+                    // The developer should simply ignore and continue
                     log("      forcing recreation of PMF next time");
                     DataNucleusApplicationComponents.markAsStale();
                 }
