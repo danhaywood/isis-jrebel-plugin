@@ -213,11 +213,7 @@ public class IsisJRebelPlugin implements Plugin {
                 log("    loaded: " + cls.getName());
                 log("    - classloader: " + cls.getClassLoader().toString());
                 if (false) {
-                    log("    - methods:");
-                    Method[] methods = cls.getMethods();
-                    for (Method method : methods) {
-                        log("      - " + method.toString());
-                    }
+                    logMethods(cls);
                 }
 
                 
@@ -249,125 +245,44 @@ public class IsisJRebelPlugin implements Plugin {
                 return bytecode;
             }
 
+            private void logMethods(Class<?> cls) {
+                log("    - methods:");
+                Method[] methods = cls.getMethods();
+                for (Method method : methods) {
+                    log("      - " + method.toString());
+                }
+            }
+
 
             // we invalidate the metadata for the remainder of this call, then
             // tell Isis to recreate the PMF lazily next time.
             // (as good as we can do?)
             private void discardJdoMetadata(String className, byte[] bytecode, CustomClassLoader ccl) {
-                log("  updating JDO metadata: " + className);
 
+                log("  discarding existing JDO metadata: " + className);
                 MetaDataManager metaDataManager = DataNucleusApplicationComponents.getMetaDataManager();
-                if (metaDataManager == null) {
-                    log("    DataNucleus not yet instantiated, so skipping");
-                    return;
-                }
-
-                ClassLoaderResolverImpl clr = new ClassLoaderResolverImpl(ccl);
-                AbstractClassMetaData existingMetadata = metaDataManager.getMetaDataForClass(className, clr);
-
-                if (existingMetadata == null) {
-                    log("    no existing metadata to unload");
-                } else {
-                    log("    unloading metadata");
-                    metaDataManager.unloadMetaDataForClass(className);
-                }
-
-                DataNucleusApplicationComponents.markAsStale();
-            }
-
-            // update the existing PMF's metadata
-            private void recreateJdoMetadata(String className, byte[] bytecode, CustomClassLoader ccl) {
-                log("  updating JDO metadata: " + className);
-
-                MetaDataManager metaDataManager = DataNucleusApplicationComponents.getMetaDataManager();
-                if (metaDataManager == null) {
-                    log("    DataNucleus not yet instantiated, so skipping");
-                    return;
-                }
-
-                // this triggers are load of the same class, but the
-                // 'processing' flag should mean we return...
-                TypeMetadata newMetadata = newMetadataFor(className, ccl);
-
-                ClassLoaderResolverImpl clr = new ClassLoaderResolverImpl(ccl);
-                AbstractClassMetaData existingMetadata = metaDataManager.getMetaDataForClass(className, clr);
-
-                if (existingMetadata == null) {
-                    log("    no existing metadata to unload");
-                } else {
-                    String existingMetadataStr = existingMetadata.toString();
-                    String newMetadataStr = newMetadata.toString();
-
-                    if (existingMetadataStr.equals(newMetadataStr)) {
-                        log("    metadata is unchanged, so skipping");
-                        return;
+                if (metaDataManager != null) {
+                    ClassLoaderResolverImpl clr = new ClassLoaderResolverImpl(ccl);
+                    AbstractClassMetaData existingMetadata = metaDataManager.getMetaDataForClass(className, clr);
+                    
+                    if (existingMetadata == null) {
+                        log("    no existing metadata to unload");
                     } else {
                         log("    unloading metadata");
-                        metaDataManager.unloadMetaDataForClass(className);
+                        try {
+                            metaDataManager.unloadMetaDataForClass(className);
+                        } catch(Exception ignore) {
+                            // sometimes get a LinkageError here, some sort of race condition?
+                            // have decided not to care about it, since we recreate the PMF anyway next time round
+                        }
                     }
+                } else {
+                    log("    DataNucleus not yet instantiated, so skipping");
                 }
 
-                //
-                // this doesn't seem to be sufficient; any changes made to the object don't get persisted
-                // does the StoreManager also need impacting?
-                //
-                log("    (re)creating JDO metadata");
-                AbstractClassMetaData metaDataForClass = metaDataManager.getMetaDataForClass(className, clr);
-                log("      JDO metadata: " + metaDataForClass.toString("", "        "));
-            }
 
-            private byte[] enhance(String className, byte[] bytecode, TypeMetadata typeMetadata, CustomClassLoader customClassLoader) {
-                JDOMetadata jdoMetadata = jdoMetadataFor(typeMetadata);
-
-                if (jdoMetadata == null) {
-                    log("      could not locate parent jdo metadata, skipping");
-                    return bytecode;
-                }
-
-                // enhance
-                JDOEnhancer enhancer = JDOHelper.getEnhancer();
-                enhancer.setClassLoader(customClassLoader);
-
-                enhancer.registerMetadata(jdoMetadata);
-
-                // Enhance the in-memory bytes
-                enhancer.addClass(className, bytecode);
-                enhancer.enhance();
-
-                bytecode = enhancer.getEnhancedBytes(className);
-                return bytecode;
-            }
-
-            private JDOMetadata jdoMetadataFor(TypeMetadata typeMetadata) {
-                Metadata md = typeMetadata;
-                Metadata parent;
-                JDOMetadata jdoMetadata = null;
-                while ((parent = md.getParent()) != null) {
-                    log("      - parent: " + parent.getClass().getName());
-                    log("      - parent.toString():\n" + parent.toString());
-                    md = parent;
-                    if (md instanceof JDOMetadata) {
-                        jdoMetadata = (JDOMetadata) md;
-                    }
-                }
-                return jdoMetadata;
-            }
-
-            private TypeMetadata newMetadataFor(String className, CustomClassLoader customClassLoader) {
-                Map<String, Object> props = new HashMap<String, Object>();
-                props.put("datanucleus.primaryClassLoader", customClassLoader);
-                props.put("datanucleus.identifier.case", "PreserveCase");
-                props.put("javax.jdo.PersistenceManagerFactoryClass", "org.datanucleus.api.jdo.JDOPersistenceManagerFactory");
-                props.put("javax.jdo.option.ConnectionDriverName", "org.hsqldb.jdbcDriver");
-                props.put("javax.jdo.option.ConnectionURL", "jdbc:hsqldb:mem:test");
-                props.put("javax.jdo.option.ConnectionUserName", "sa");
-                props.put("javax.jdo.option.ConnectionPassword", "");
-
-                PersistenceManagerFactory persistenceManagerFactory = JDOHelper.getPersistenceManagerFactory(props, "simple");
-                TypeMetadata typeMetadata = persistenceManagerFactory.getMetadata(className);
-
-                log("      typeMetadata: " + typeMetadata.getName());
-                return typeMetadata;
+                log("  forcing PMF to recreate next time");
+                DataNucleusApplicationComponents.markAsStale();
             }
         };
     }
