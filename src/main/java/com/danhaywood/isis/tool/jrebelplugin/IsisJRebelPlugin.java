@@ -17,13 +17,14 @@
 
 package com.danhaywood.isis.tool.jrebelplugin;
 
+import java.io.InputStream;
+import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.datanucleus.ClassLoaderResolverImpl;
-import org.datanucleus.metadata.AbstractClassMetaData;
 import org.datanucleus.metadata.MetaDataManager;
 import org.zeroturnaround.bundled.javassist.ByteArrayClassPath;
+import org.zeroturnaround.bundled.javassist.ClassPath;
 import org.zeroturnaround.bundled.javassist.ClassPool;
 import org.zeroturnaround.bundled.javassist.CtClass;
 import org.zeroturnaround.bundled.javassist.LoaderClassPath;
@@ -131,53 +132,24 @@ public class IsisJRebelPlugin implements Plugin {
                 }
 
                 log("processing: " + className);
+                CtClass ctClass = asCtClass(cl, className, bytecode);
 
-                ClassPool cp = new ClassPool();
-                cp.appendClassPath(new RebelClassPath());
-                cp.appendClassPath(new ByteArrayClassPath(className, bytecode));
-                cp.appendSystemPath();
-                cp.appendClassPath(new LoaderClassPath(cl));
-                CtClass ctClass = cp.get(className);
-                ctClass.defrost();
-
-                log("  annotations:");
-                Object[] annotations = ctClass.getAnnotations();
-                boolean persistenceCapable = false;
-                for (Object annotation : annotations) {
-                    log("  - " + annotation);
-                    if (annotation.toString().contains("@javax.jdo.annotations.PersistenceCapable")) {
-                        persistenceCapable = true;
-                    }
-                }
-
+                
+                boolean persistenceCapable = isPersistenceCapable(ctClass);
+                log("  determining whether bytecode represents a persistence-capable entity...");
                 if (!persistenceCapable) {
-                    log("  not persistence-capable entity, skipping");
+                    log("    not persistence-capable entity, skipping");
                     return bytecode;
                 }
 
                 // figure out if this bytecode has been enhanced
                 log("  determining whether bytecode has been enhanced...");
-                CtClass[] interfaces = ctClass.getInterfaces();
-                boolean enhanced = false;
-                log("    implements interfaces:");
-                if (interfaces != null) {
-                    for (CtClass ifc : interfaces) {
-                        log("    - " + ifc.getName());
-                        if ("javax.jdo.spi.PersistenceCapable".equals(ifc.getName())) {
-                            enhanced = true;
-                        }
-                    }
-                }
-
-                if (!enhanced) {
-                    log("    not enhanced");
-                } else {
-                    log("    enhanced");
-                }
+                boolean enhanced = isEnhanced(ctClass);
 
                 
                 // enhance ...
                 if (!enhanced) {
+                    log("    not enhanced");
 
                     // ignore any unenhanced bytecode, and just use
                     // the previous (enhanced) bytecode previous seen.
@@ -188,10 +160,11 @@ public class IsisJRebelPlugin implements Plugin {
                     // that the Eclipse compiler finished its compilation (ie eagerly), and that the follow-up load with
                     // enhanced bytes occurred when the object was interacted with (ie lazily).  So, depending on
                     // user action, there could be several seconds (even minutes) gap between the two calls.
-                    log("  using previous (enhanced) bytecode");
+                    log("      using previous (enhanced) bytecode");
                     bytecode = bytecodeByClassName.get(className);
                     
                 } else {
+                    log("    enhanced");
 
                     // the bytecode we have represents an enhanced class, so cache it 
                     // so can use it in future if this class is ever reloaded in an unenhanced form
@@ -204,44 +177,80 @@ public class IsisJRebelPlugin implements Plugin {
                 return bytecode;
             }
 
-            // we invalidate the metadata for the remainder of this call, then
-            // tell Isis to recreate the PMF lazily next time.
-            // (as good as we can do?)
-            private void discardJdoMetadata(String className, byte[] bytecode) throws ClassNotFoundException {
 
-                log("  loading bytecode into separate classloader ");
-                ClassLoader systemClassLoader = ClassLoader.getSystemClassLoader();
-                CustomClassLoader ccl = new CustomClassLoader(systemClassLoader);
-
-                ccl.defineClass(className, bytecode);
-                ccl.loadClass(className);
-
-                log("  discarding existing JDO metadata: " + className);
-                MetaDataManager metaDataManager = DataNucleusApplicationComponents.getMetaDataManager();
-                if (metaDataManager != null) {
-                    ClassLoaderResolverImpl clr = new ClassLoaderResolverImpl(ccl);
-                    AbstractClassMetaData existingMetadata = metaDataManager.getMetaDataForClass(className, clr);
-                    
-                    if (existingMetadata == null) {
-                        log("    no existing metadata to unload");
-                    } else {
-                        log("    unloading metadata");
-                        try {
-                            metaDataManager.unloadMetaDataForClass(className);
-                        } catch(Exception ignore) {
-                            // sometimes get a LinkageError here, some sort of race condition?
-                            // have decided not to care about it, since we recreate the PMF anyway next time round
-                        }
-                    }
-                } else {
-                    log("    DataNucleus not yet instantiated, so skipping");
-                }
-
-
-                log("  forcing PMF to recreate next time");
-                DataNucleusApplicationComponents.markAsStale();
-            }
         };
+    }
+
+    private static boolean isPersistenceCapable(CtClass ctClass) throws ClassNotFoundException {
+        log("  annotations:");
+        Object[] annotations = ctClass.getAnnotations();
+        boolean persistenceCapable = false;
+        for (Object annotation : annotations) {
+            log("  - " + annotation);
+            if (annotation.toString().contains("@javax.jdo.annotations.PersistenceCapable")) {
+                persistenceCapable = true;
+            }
+        }
+        return persistenceCapable;
+    }
+
+    private static boolean isEnhanced(CtClass ctClass) throws NotFoundException {
+        CtClass[] interfaces = ctClass.getInterfaces();
+        boolean enhanced = false;
+        log("    implements interfaces:");
+        if (interfaces != null) {
+            for (CtClass ifc : interfaces) {
+                log("    - " + ifc.getName());
+                if ("javax.jdo.spi.PersistenceCapable".equals(ifc.getName())) {
+                    enhanced = true;
+                }
+            }
+        }
+        return enhanced;
+    }
+
+    private static CtClass asCtClass(ClassLoader cl, String className, byte[] bytecode) throws NotFoundException {
+        ClassPool cp = new ClassPool();
+        cp.appendClassPath(new ClassPath() {
+            public void close() {
+            }
+            public URL find(String arg0) {
+                return null;
+            }
+            public InputStream openClassfile(String arg0) throws NotFoundException {
+                return null;
+            }
+        });
+        cp.appendClassPath(new ByteArrayClassPath(className, bytecode));
+        cp.appendSystemPath();
+        cp.appendClassPath(new LoaderClassPath(cl));
+        CtClass ctClass = cp.get(className);
+        ctClass.defrost();
+        return ctClass;
+    }
+    
+    // we invalidate the metadata for the remainder of this call, then
+    // tell Isis to recreate the PMF lazily next time.
+    // (as good as we can do?)
+    private static void discardJdoMetadata(String className, byte[] bytecode) {
+        
+        log("      discarding existing JDO metadata: " + className);
+        MetaDataManager metaDataManager = DataNucleusApplicationComponents.getMetaDataManager();
+        if (metaDataManager != null) {
+            log("        unloading metadata");
+            try {
+                metaDataManager.unloadMetaDataForClass(className);
+            } catch(Exception ignore) {
+                // sometimes get a LinkageError here, some sort of race condition?
+                // have decided not to care about it, since we recreate the PMF anyway next time round
+                log("          exception thrown, ignoring: " + ignore.getMessage());
+            }
+        } else {
+            log("        DataNucleus not yet instantiated, so skipping");
+        }
+        
+        log("      forcing PMF to recreate next time");
+        DataNucleusApplicationComponents.markAsStale();
     }
 
     private ClassEventListener newClassLoadListener() {
