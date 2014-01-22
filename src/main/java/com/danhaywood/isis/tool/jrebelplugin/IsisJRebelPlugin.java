@@ -67,17 +67,7 @@ import org.apache.isis.objectstore.jdo.datanucleus.DataNucleusPersistenceMechani
 
 public class IsisJRebelPlugin implements Plugin {
 
-    static class BytecodeAndMetadata {
-        byte[] bytecode;
-        String metadataStr;
-        public BytecodeAndMetadata(byte[] bytecode, String metadataStr) {
-            this.bytecode = bytecode;
-            this.metadataStr = metadataStr;
-        }
-    }
-    
-    // HORRID!!!! but JRebel seems to use different instances for the various callbacks ...?
-    private static final Map<String, BytecodeAndMetadata> bytecodeAndMetadataByClassName = new HashMap<String, BytecodeAndMetadata>();
+    private final Map<String, byte[]> bytecodeByClassName = new HashMap<String, byte[]>();
 
     private String packagePrefix;
 
@@ -135,12 +125,21 @@ public class IsisJRebelPlugin implements Plugin {
 
     }
 
+    // prevent infinite loop
+    boolean processing = false;
+
     private ClassBytecodeProcessor newIntegrationProcessor() {
         return new ClassBytecodeProcessor() {
 
             public byte[] process(ClassLoader cl, String className, byte[] bytecode) {
 
                 try {
+                    if(processing) {
+                        return bytecode;
+                    }
+                    
+                    processing = true;
+                    
                     className = className.replace('/', '.');
 
                     if(!underPackage(className)) {
@@ -196,13 +195,13 @@ public class IsisJRebelPlugin implements Plugin {
 
                     log("  loading bytecode into separate classloader ");
                     ClassLoader systemClassLoader = ClassLoader.getSystemClassLoader();
-                    CustomClassLoader customClassLoader = new CustomClassLoader(systemClassLoader);
+                    CustomClassLoader ccl = new CustomClassLoader(systemClassLoader);
 
-                    customClassLoader.defineClass(className, bytecode);
+                    ccl.defineClass(className, bytecode);
 
 
                     // debugging; just to show what actually was loaded...
-                    Class<?> cls = customClassLoader.loadClass(className);
+                    Class<?> cls = ccl.loadClass(className);
                     log("    loaded: " + cls.getName());
                     log("    - classloader: " + cls.getClassLoader().toString());
                     if(false) {
@@ -230,23 +229,55 @@ public class IsisJRebelPlugin implements Plugin {
                             log("  performing an in-memory enhancement of the bytecode ");
 
                             // obtain the metadata ... can this be done for unenhanced bytes?
-                            TypeMetadata typeMetadata = metadataFor(className, customClassLoader);
-                            bytecode = enhance(className, bytecode, typeMetadata, customClassLoader);
+                            TypeMetadata newMetadata = newMetadataFor(className, ccl);
+                            bytecode = enhance(className, bytecode, newMetadata, ccl);
 
                             // ... if the above steps DID work, then should cache the bytecode and metadata.toString() as below
 
                         } else {
                             // ... this will work... just use the (enhanced) bytecode previous seen.
                             log("  using previous (enhanced) bytecode");
-                            bytecode = bytecodeAndMetadataByClassName.get(className).bytecode;
+                            bytecode = bytecodeByClassName.get(className);
                         }
                     } else {
 
-                        // obtain the metadata
-                        // (will this work for unenhanced bytes?)
-                        TypeMetadata typeMetadata = metadataFor(className, customClassLoader);
+                        // cache in case this class is reloaded unenhanced in the future
+                        bytecodeByClassName.put(className, bytecode);
 
-                        bytecodeAndMetadataByClassName.put(className, new BytecodeAndMetadata(bytecode, typeMetadata.toString()));
+                        log("  updating JDO metadata: " + className);
+
+                        MetaDataManager metaDataManager = DataNucleusApplicationComponents.getMetaDataManager();
+                        if (metaDataManager == null) {
+                            log("    DataNucleus not yet instantiated, so skipping");
+                            return bytecode;
+                        } 
+
+                        // this triggers are load of the same class, but the 
+                        // 'processing' flag should mean we return...
+                        TypeMetadata newMetadata = newMetadataFor(className, ccl);
+                        
+                        ClassLoaderResolverImpl clr = new ClassLoaderResolverImpl(ccl);
+                        AbstractClassMetaData existingMetadata = metaDataManager.getMetaDataForClass(className, clr);
+
+                        if(existingMetadata == null) {
+                            log("    no existing metadata to unload");
+                        } else {
+                            String existingMetadataStr = existingMetadata.toString();
+                            String newMetadataStr = newMetadata.toString();
+                            
+                            if(existingMetadataStr.equals(newMetadataStr)) {
+                                log("    metadata is unchanged, so skipping");
+                                return bytecode;
+                            } else {
+                                log("    unloading metadata");
+                                metaDataManager.unloadMetaDataForClass(className);
+                            }
+                        }
+
+                        log("    (re)creating JDO metadata");
+                        AbstractClassMetaData metaDataForClass = metaDataManager.getMetaDataForClass(className, clr);
+                        log("      JDO metadata: " + metaDataForClass.toString("", 
+                                "        "));
                     }
 
                     return bytecode;
@@ -254,6 +285,8 @@ public class IsisJRebelPlugin implements Plugin {
                 } catch (Throwable e) {
                     e.printStackTrace(System.err);
                     return bytecode;
+                } finally {
+                    processing = false;
                 }
             }
 
@@ -294,7 +327,7 @@ public class IsisJRebelPlugin implements Plugin {
                 return jdoMetadata;
             }
 
-            private TypeMetadata metadataFor(String className, CustomClassLoader customClassLoader) {
+            private TypeMetadata newMetadataFor(String className, CustomClassLoader customClassLoader) {
                 Map<String, Object> props = new HashMap<String, Object>();
                 props.put("datanucleus.primaryClassLoader", customClassLoader);
                 props.put("datanucleus.identifier.case", "PreserveCase");
@@ -318,7 +351,7 @@ public class IsisJRebelPlugin implements Plugin {
 
             @SuppressWarnings("rawtypes")
             public void onClassEvent(int eventType, Class klass) {
-                updateMetadata("loading: ", klass);
+                updateIsisMetadata("loading: ", klass);
             }
 
             public int priority() {
@@ -331,7 +364,7 @@ public class IsisJRebelPlugin implements Plugin {
         return new ClassEventListener() {
             @SuppressWarnings("rawtypes")
             public void onClassEvent(int eventType, Class klass) {
-                updateMetadata("reloading: ", klass);
+                updateIsisMetadata("reloading: ", klass);
             }
             
             public int priority() {
@@ -342,7 +375,7 @@ public class IsisJRebelPlugin implements Plugin {
     
 
     @SuppressWarnings("rawtypes")
-    private void updateMetadata(String msg, Class klass) {
+    private void updateIsisMetadata(String msg, Class klass) {
 
         final String className = klass.getName();
         if(!underPackage(className)) {
@@ -358,47 +391,12 @@ public class IsisJRebelPlugin implements Plugin {
             log("    skipping, Isis metamodel not yet available");
         }
         
-        if(!isEntity(klass)) {
-            return;
-        }
-
-        log("  updating JDO metadata: " + className);
-
-        MetaDataManager metaDataManager = DataNucleusApplicationComponents.getMetaDataManager();
-        if (metaDataManager == null) {
-            log("    DataNucleus not yet instantiated so skipping");
-            return;
-        } 
-        ClassLoaderResolverImpl clr = new ClassLoaderResolverImpl();
-        AbstractClassMetaData existingMetadata = metaDataManager.getMetaDataForClass(className, clr);
-        
-        if(existingMetadata != null) {
-            String metadataStr = bytecodeAndMetadataByClassName.get(className).metadataStr;
-            String existingMetadataStr = existingMetadata.toString();
-            if(existingMetadataStr.equals(metadataStr)) {
-                log("    metadata is unchanged, so sjipping");
-                return;
-            } 
-            log("    unloading metadata");
-            metaDataManager.unloadMetaDataForClass(className);
-        } else {
-            log("    no existing metadata to unload");
-        }
-        
-        log("    (re)creating JDO metadata");
-        AbstractClassMetaData metaDataForClass = metaDataManager.getMetaDataForClass(klass, clr);
-        log("      JDO metadata: " + metaDataForClass.toString("", 
-                "        "));
     }
 
     private boolean underPackage(String className) {
         return packagePrefix != null && className.startsWith(packagePrefix);
     }
     
-    private static boolean isEntity(Class<?> klass) {
-        return PersistenceCapable.class.isAssignableFrom(klass);
-    }
-
     private static void log(String msg) {
         LoggerFactory.getInstance().log(msg);
         System.err.println(msg);
