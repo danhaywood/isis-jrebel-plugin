@@ -17,39 +17,15 @@
 
 package com.danhaywood.isis.tool.jrebelplugin;
 
-import java.lang.reflect.Method;
-import java.net.URL;
-import java.net.URLClassLoader;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
 
-import javax.jdo.JDOEnhancer;
-import javax.jdo.JDOHelper;
-import javax.jdo.PersistenceManagerFactory;
-import javax.jdo.metadata.ClassMetadata;
-import javax.jdo.metadata.JDOMetadata;
-import javax.jdo.metadata.Metadata;
-import javax.jdo.metadata.PackageMetadata;
-import javax.jdo.metadata.TypeMetadata;
-import javax.jdo.spi.PersistenceCapable;
-
-import org.datanucleus.ClassLoaderResolver;
 import org.datanucleus.ClassLoaderResolverImpl;
-import org.datanucleus.api.jdo.JDOPersistenceManagerFactory;
-import org.datanucleus.api.jdo.metadata.JDOMetaDataManager;
-import org.datanucleus.enhancer.DataNucleusEnhancer;
 import org.datanucleus.metadata.AbstractClassMetaData;
 import org.datanucleus.metadata.MetaDataManager;
 import org.zeroturnaround.bundled.javassist.ByteArrayClassPath;
 import org.zeroturnaround.bundled.javassist.ClassPool;
 import org.zeroturnaround.bundled.javassist.CtClass;
-import org.zeroturnaround.bundled.javassist.CtField;
 import org.zeroturnaround.bundled.javassist.LoaderClassPath;
 import org.zeroturnaround.bundled.javassist.NotFoundException;
 import org.zeroturnaround.javarebel.ClassBytecodeProcessor;
@@ -61,10 +37,7 @@ import org.zeroturnaround.javarebel.LoggerFactory;
 import org.zeroturnaround.javarebel.Plugin;
 import org.zeroturnaround.javarebel.ReloaderFactory;
 
-import org.apache.isis.core.runtime.persistence.PersistenceSessionFactoryDelegating;
-import org.apache.isis.core.runtime.system.persistence.PersistenceSessionFactory;
 import org.apache.isis.objectstore.jdo.datanucleus.DataNucleusApplicationComponents;
-import org.apache.isis.objectstore.jdo.datanucleus.DataNucleusPersistenceMechanismInstaller;
 
 public class IsisJRebelPlugin implements Plugin {
 
@@ -202,20 +175,6 @@ public class IsisJRebelPlugin implements Plugin {
                     log("    enhanced");
                 }
 
-                log("  loading bytecode into separate classloader ");
-                ClassLoader systemClassLoader = ClassLoader.getSystemClassLoader();
-                CustomClassLoader ccl = new CustomClassLoader(systemClassLoader);
-
-                ccl.defineClass(className, bytecode);
-
-                // debugging; just to show what actually was loaded...
-                Class<?> cls = ccl.loadClass(className);
-                log("    loaded: " + cls.getName());
-                log("    - classloader: " + cls.getClassLoader().toString());
-                if (false) {
-                    logMethods(cls);
-                }
-
                 
                 // enhance ...
                 if (!enhanced) {
@@ -239,25 +198,23 @@ public class IsisJRebelPlugin implements Plugin {
                     // (ie the other branch of this if statement)
                     bytecodeByClassName.put(className, bytecode);
 
-                    discardJdoMetadata(className, bytecode, ccl);
+                    discardJdoMetadata(className, bytecode);
                 }
 
                 return bytecode;
             }
 
-            private void logMethods(Class<?> cls) {
-                log("    - methods:");
-                Method[] methods = cls.getMethods();
-                for (Method method : methods) {
-                    log("      - " + method.toString());
-                }
-            }
-
-
             // we invalidate the metadata for the remainder of this call, then
             // tell Isis to recreate the PMF lazily next time.
             // (as good as we can do?)
-            private void discardJdoMetadata(String className, byte[] bytecode, CustomClassLoader ccl) {
+            private void discardJdoMetadata(String className, byte[] bytecode) throws ClassNotFoundException {
+
+                log("  loading bytecode into separate classloader ");
+                ClassLoader systemClassLoader = ClassLoader.getSystemClassLoader();
+                CustomClassLoader ccl = new CustomClassLoader(systemClassLoader);
+
+                ccl.defineClass(className, bytecode);
+                ccl.loadClass(className);
 
                 log("  discarding existing JDO metadata: " + className);
                 MetaDataManager metaDataManager = DataNucleusApplicationComponents.getMetaDataManager();
