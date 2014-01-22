@@ -51,6 +51,7 @@ import org.zeroturnaround.bundled.javassist.ClassPool;
 import org.zeroturnaround.bundled.javassist.CtClass;
 import org.zeroturnaround.bundled.javassist.CtField;
 import org.zeroturnaround.bundled.javassist.LoaderClassPath;
+import org.zeroturnaround.bundled.javassist.NotFoundException;
 import org.zeroturnaround.javarebel.ClassBytecodeProcessor;
 import org.zeroturnaround.javarebel.ClassEventListener;
 import org.zeroturnaround.javarebel.ClassResourceSource;
@@ -75,12 +76,12 @@ public class IsisJRebelPlugin implements Plugin {
 
     public boolean checkDependencies(ClassLoader classLoader, ClassResourceSource classResourceSource) {
 
-        if(metDependencies) {
+        if (metDependencies) {
             return metDependencies;
         }
-        
+
         packagePrefix = System.getProperty("isis-jrebel-plugin.packagePrefix");
-        if(packagePrefix == null) {
+        if (packagePrefix == null) {
             log("*****************************************************************");
             log("*");
             log("* Isis JRebel Plugin is ***DISABLED***");
@@ -92,7 +93,7 @@ public class IsisJRebelPlugin implements Plugin {
             return false;
         }
 
-        if(classResourceSource.getClassResource("org.apache.isis.core.runtime.system.context.IsisContext") == null) {
+        if (classResourceSource.getClassResource("org.apache.isis.core.runtime.system.context.IsisContext") == null) {
             log("Isis JRebel Plugin ignored, Isis framework classes not found");
             return false;
         }
@@ -107,19 +108,18 @@ public class IsisJRebelPlugin implements Plugin {
         return (metDependencies = true);
     }
 
-
     public void preinit() {
 
         // necessary to do again (as well as in checkDependencies) because
         // JRebel seems to instantiate the plugin twice, once to do the check,
-        // second do actually initialize.
+        // second to actually initialize.
         packagePrefix = System.getProperty("isis-jrebel-plugin.packagePrefix");
 
         Integration i = IntegrationFactory.getInstance();
         ClassLoader cl = IsisJRebelPlugin.class.getClassLoader();
-        
+
         i.addIntegrationProcessor(cl, newIntegrationProcessor());
-        
+
         ReloaderFactory.getInstance().addClassLoadListener(newClassLoadListener());
         ReloaderFactory.getInstance().addClassReloadListener(newClassReloadListener());
 
@@ -127,167 +127,193 @@ public class IsisJRebelPlugin implements Plugin {
 
     // prevent infinite loop
     boolean processing = false;
+    // ensure single-threaded
+    private Object threadSafety = new Object();
 
     private ClassBytecodeProcessor newIntegrationProcessor() {
         return new ClassBytecodeProcessor() {
 
             public byte[] process(ClassLoader cl, String className, byte[] bytecode) {
-
-                try {
-                    if(processing) {
+                synchronized (threadSafety) {
+                    if (processing) {
                         return bytecode;
                     }
-                    
                     processing = true;
-                    
-                    className = className.replace('/', '.');
-
-                    if(!underPackage(className)) {
+                    try {
+                        return processSafely(cl, className, bytecode);
+                    } catch (Throwable e) {
+                        e.printStackTrace(System.err);
                         return bytecode;
+                    } finally {
+                        processing = false;
                     }
-
-                    log("processing: " + className);
-
-                    ClassPool cp = new ClassPool();
-                    cp.appendClassPath(new RebelClassPath());
-                    cp.appendClassPath(new ByteArrayClassPath(className, bytecode));
-                    cp.appendSystemPath();
-                    cp.appendClassPath(new LoaderClassPath(cl));
-                    CtClass ctClass = cp.get(className);
-                    ctClass.defrost();
-
-                    log("  annotations:");
-                    Object[] annotations = ctClass.getAnnotations();
-                    boolean persistenceCapable = false;
-                    for (Object annotation : annotations) {
-                        log("  - " + annotation);
-                        if (annotation.toString().contains("@javax.jdo.annotations.PersistenceCapable")) {
-                            persistenceCapable = true;
-                        }
-                    }
-
-                    if (!persistenceCapable) {
-                        log("  not persistence-capable entity, skipping");
-                        return bytecode;
-                    }
-
-
-                    // figure out if this bytecode has been enhanced
-                    log("  determining whether bytecode has been enhanced...");
-                    CtClass[] interfaces = ctClass.getInterfaces();
-                    boolean enhanced = false;
-                    log("    implements interfaces:");
-                    if (interfaces != null) {
-                        for (CtClass ifc : interfaces) {
-                            log("    - " + ifc.getName());
-                            if ("javax.jdo.spi.PersistenceCapable".equals(ifc.getName())) {
-                                enhanced = true;
-                            }
-                        }
-                    }
-
-                    if (!enhanced) {
-                        log("    not enhanced");
-                    } else {
-                        log("    enhanced");
-                    }
-
-
-                    log("  loading bytecode into separate classloader ");
-                    ClassLoader systemClassLoader = ClassLoader.getSystemClassLoader();
-                    CustomClassLoader ccl = new CustomClassLoader(systemClassLoader);
-
-                    ccl.defineClass(className, bytecode);
-
-
-                    // debugging; just to show what actually was loaded...
-                    Class<?> cls = ccl.loadClass(className);
-                    log("    loaded: " + cls.getName());
-                    log("    - classloader: " + cls.getClassLoader().toString());
-                    if(false) {
-                        log("    - methods:");
-                        Method[] methods = cls.getMethods();
-                        for (Method method : methods) {
-                            log("      - " + method.toString());
-                        }
-                    }
-
-                    
-                    
-                    // enhance ... 
-                    if (!enhanced) {
-
-                        // ... however, I don't think the enhancement stuff works, 
-                        // but I don't think it's necessary either, because we can rely on 
-                        // the Eclipse plugin doing the enhancement instead.
-                        //
-                        // instead, any unenhanced bytecode is ignored, and just use
-                        // the 'best available'
-
-                        if (false) {
-                            // don't think this works...
-                            log("  performing an in-memory enhancement of the bytecode ");
-
-                            // obtain the metadata ... can this be done for unenhanced bytes?
-                            TypeMetadata newMetadata = newMetadataFor(className, ccl);
-                            bytecode = enhance(className, bytecode, newMetadata, ccl);
-
-                            // ... if the above steps DID work, then should cache the bytecode and metadata.toString() as below
-
-                        } else {
-                            // ... this will work... just use the (enhanced) bytecode previous seen.
-                            log("  using previous (enhanced) bytecode");
-                            bytecode = bytecodeByClassName.get(className);
-                        }
-                    } else {
-
-                        // cache in case this class is reloaded unenhanced in the future
-                        bytecodeByClassName.put(className, bytecode);
-
-                        log("  updating JDO metadata: " + className);
-
-                        MetaDataManager metaDataManager = DataNucleusApplicationComponents.getMetaDataManager();
-                        if (metaDataManager == null) {
-                            log("    DataNucleus not yet instantiated, so skipping");
-                            return bytecode;
-                        } 
-
-                        // this triggers are load of the same class, but the 
-                        // 'processing' flag should mean we return...
-                        TypeMetadata newMetadata = newMetadataFor(className, ccl);
-                        
-                        ClassLoaderResolverImpl clr = new ClassLoaderResolverImpl(ccl);
-                        AbstractClassMetaData existingMetadata = metaDataManager.getMetaDataForClass(className, clr);
-
-                        if(existingMetadata == null) {
-                            log("    no existing metadata to unload");
-                        } else {
-                            String existingMetadataStr = existingMetadata.toString();
-                            String newMetadataStr = newMetadata.toString();
-                            
-                            if(existingMetadataStr.equals(newMetadataStr)) {
-                                log("    metadata is unchanged, so skipping");
-                                return bytecode;
-                            } else {
-                                log("    unloading metadata");
-                                metaDataManager.unloadMetaDataForClass(className);
-                            }
-                        }
-
-                        log("    (re)creating JDO metadata");
-                        AbstractClassMetaData metaDataForClass = metaDataManager.getMetaDataForClass(className, clr);
-                        log("      JDO metadata: " + metaDataForClass.toString("", 
-                                "        "));
-                    }
-
-                    return bytecode;
-
-                } catch (Throwable e) {
-                    e.printStackTrace(System.err);
-                    return bytecode;
-                } finally {
-                    processing = false;
                 }
+            }
+
+            private byte[] processSafely(ClassLoader cl, String className, byte[] bytecode) throws NotFoundException, ClassNotFoundException {
+                className = className.replace('/', '.');
+
+                if (!underPackage(className)) {
+                    return bytecode;
+                }
+
+                log("processing: " + className);
+
+                ClassPool cp = new ClassPool();
+                cp.appendClassPath(new RebelClassPath());
+                cp.appendClassPath(new ByteArrayClassPath(className, bytecode));
+                cp.appendSystemPath();
+                cp.appendClassPath(new LoaderClassPath(cl));
+                CtClass ctClass = cp.get(className);
+                ctClass.defrost();
+
+                log("  annotations:");
+                Object[] annotations = ctClass.getAnnotations();
+                boolean persistenceCapable = false;
+                for (Object annotation : annotations) {
+                    log("  - " + annotation);
+                    if (annotation.toString().contains("@javax.jdo.annotations.PersistenceCapable")) {
+                        persistenceCapable = true;
+                    }
+                }
+
+                if (!persistenceCapable) {
+                    log("  not persistence-capable entity, skipping");
+                    return bytecode;
+                }
+
+                // figure out if this bytecode has been enhanced
+                log("  determining whether bytecode has been enhanced...");
+                CtClass[] interfaces = ctClass.getInterfaces();
+                boolean enhanced = false;
+                log("    implements interfaces:");
+                if (interfaces != null) {
+                    for (CtClass ifc : interfaces) {
+                        log("    - " + ifc.getName());
+                        if ("javax.jdo.spi.PersistenceCapable".equals(ifc.getName())) {
+                            enhanced = true;
+                        }
+                    }
+                }
+
+                if (!enhanced) {
+                    log("    not enhanced");
+                } else {
+                    log("    enhanced");
+                }
+
+                log("  loading bytecode into separate classloader ");
+                ClassLoader systemClassLoader = ClassLoader.getSystemClassLoader();
+                CustomClassLoader ccl = new CustomClassLoader(systemClassLoader);
+
+                ccl.defineClass(className, bytecode);
+
+                // debugging; just to show what actually was loaded...
+                Class<?> cls = ccl.loadClass(className);
+                log("    loaded: " + cls.getName());
+                log("    - classloader: " + cls.getClassLoader().toString());
+                if (false) {
+                    log("    - methods:");
+                    Method[] methods = cls.getMethods();
+                    for (Method method : methods) {
+                        log("      - " + method.toString());
+                    }
+                }
+
+                
+                // enhance ...
+                if (!enhanced) {
+
+                    // ignore any unenhanced bytecode, and just use
+                    // the previous (enhanced) bytecode previous seen.
+                    // we expect the IDE's enhancer plugin to provide a further class load with
+                    // new enhanced bytes.
+                    //
+                    // in testing, found that the call with unenhanced bytes often seemed to happen immediately
+                    // that the Eclipse compiler finished its compilation (ie eagerly), and that the follow-up load with
+                    // enhanced bytes occurred when the object was interacted with (ie lazily).  So, depending on
+                    // user action, there could be several seconds (even minutes) gap between the two calls.
+                    log("  using previous (enhanced) bytecode");
+                    bytecode = bytecodeByClassName.get(className);
+                    
+                } else {
+
+                    // the bytecode we have represents an enhanced class, so cache it 
+                    // so can use it in future if this class is ever reloaded in an unenhanced form
+                    // (ie the other branch of this if statement)
+                    bytecodeByClassName.put(className, bytecode);
+
+                    discardJdoMetadata(className, bytecode, ccl);
+                }
+
+                return bytecode;
+            }
+
+
+            // we invalidate the metadata for the remainder of this call, then
+            // tell Isis to recreate the PMF lazily next time.
+            // (as good as we can do?)
+            private void discardJdoMetadata(String className, byte[] bytecode, CustomClassLoader ccl) {
+                log("  updating JDO metadata: " + className);
+
+                MetaDataManager metaDataManager = DataNucleusApplicationComponents.getMetaDataManager();
+                if (metaDataManager == null) {
+                    log("    DataNucleus not yet instantiated, so skipping");
+                    return;
+                }
+
+                ClassLoaderResolverImpl clr = new ClassLoaderResolverImpl(ccl);
+                AbstractClassMetaData existingMetadata = metaDataManager.getMetaDataForClass(className, clr);
+
+                if (existingMetadata == null) {
+                    log("    no existing metadata to unload");
+                } else {
+                    log("    unloading metadata");
+                    metaDataManager.unloadMetaDataForClass(className);
+                }
+
+                DataNucleusApplicationComponents.markAsStale();
+            }
+
+            // update the existing PMF's metadata
+            private void recreateJdoMetadata(String className, byte[] bytecode, CustomClassLoader ccl) {
+                log("  updating JDO metadata: " + className);
+
+                MetaDataManager metaDataManager = DataNucleusApplicationComponents.getMetaDataManager();
+                if (metaDataManager == null) {
+                    log("    DataNucleus not yet instantiated, so skipping");
+                    return;
+                }
+
+                // this triggers are load of the same class, but the
+                // 'processing' flag should mean we return...
+                TypeMetadata newMetadata = newMetadataFor(className, ccl);
+
+                ClassLoaderResolverImpl clr = new ClassLoaderResolverImpl(ccl);
+                AbstractClassMetaData existingMetadata = metaDataManager.getMetaDataForClass(className, clr);
+
+                if (existingMetadata == null) {
+                    log("    no existing metadata to unload");
+                } else {
+                    String existingMetadataStr = existingMetadata.toString();
+                    String newMetadataStr = newMetadata.toString();
+
+                    if (existingMetadataStr.equals(newMetadataStr)) {
+                        log("    metadata is unchanged, so skipping");
+                        return;
+                    } else {
+                        log("    unloading metadata");
+                        metaDataManager.unloadMetaDataForClass(className);
+                    }
+                }
+
+                //
+                // this doesn't seem to be sufficient; any changes made to the object don't get persisted
+                // does the StoreManager also need impacting?
+                //
+                log("    (re)creating JDO metadata");
+                AbstractClassMetaData metaDataForClass = metaDataManager.getMetaDataForClass(className, clr);
+                log("      JDO metadata: " + metaDataForClass.toString("", "        "));
             }
 
             private byte[] enhance(String className, byte[] bytecode, TypeMetadata typeMetadata, CustomClassLoader customClassLoader) {
@@ -307,7 +333,7 @@ public class IsisJRebelPlugin implements Plugin {
                 // Enhance the in-memory bytes
                 enhancer.addClass(className, bytecode);
                 enhancer.enhance();
-                
+
                 bytecode = enhancer.getEnhancedBytes(className);
                 return bytecode;
             }
@@ -366,37 +392,36 @@ public class IsisJRebelPlugin implements Plugin {
             public void onClassEvent(int eventType, Class klass) {
                 updateIsisMetadata("reloading: ", klass);
             }
-            
+
             public int priority() {
                 return 0;
             }
         };
     }
-    
 
     @SuppressWarnings("rawtypes")
     private void updateIsisMetadata(String msg, Class klass) {
 
         final String className = klass.getName();
-        if(!underPackage(className)) {
+        if (!underPackage(className)) {
             return;
         }
-        
+
         log(msg + klass.getName());
-        
+
         log("  removing Isis metadata: " + className);
         if (org.apache.isis.core.runtime.system.context.IsisContext.exists()) {
             org.apache.isis.core.runtime.system.context.IsisContext.getSpecificationLoader().invalidateCache(klass);
         } else {
             log("    skipping, Isis metamodel not yet available");
         }
-        
+
     }
 
     private boolean underPackage(String className) {
         return packagePrefix != null && className.startsWith(packagePrefix);
     }
-    
+
     private static void log(String msg) {
         LoggerFactory.getInstance().log(msg);
         System.err.println(msg);
