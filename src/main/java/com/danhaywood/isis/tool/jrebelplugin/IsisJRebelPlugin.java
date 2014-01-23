@@ -42,9 +42,18 @@ import org.apache.isis.objectstore.jdo.datanucleus.DataNucleusApplicationCompone
 
 public class IsisJRebelPlugin implements Plugin {
 
+    private static enum LoggingLevel {
+        WARN, INFO, DEBUG,
+    }
+
+    private static final String ISIS_JREBEL_PLUGIN = "isis-jrebel-plugin.";
+    private static final String D_PACKAGE_PREFIX = ISIS_JREBEL_PLUGIN + "packagePrefix";
+    private static final String D_LOGGING_LEVEL = ISIS_JREBEL_PLUGIN + "loggingLevel";
+
     private final Map<String, byte[]> bytecodeByClassName = new HashMap<String, byte[]>();
 
     private String packagePrefix;
+    private LoggingLevel loggingLevel = LoggingLevel.INFO;
 
     private boolean metDependencies = false;
 
@@ -54,31 +63,31 @@ public class IsisJRebelPlugin implements Plugin {
             return metDependencies;
         }
 
-        packagePrefix = System.getProperty("isis-jrebel-plugin.packagePrefix");
+        packagePrefix = System.getProperty(D_PACKAGE_PREFIX);
         if (packagePrefix == null) {
-            log("*****************************************************************");
-            log("*");
-            log("* Isis JRebel Plugin is ***DISABLED***");
-            log("*");
-            log("* specify package prefix through system property, eg:");
-            log("*   -Disis-jrebel-plugin.packagePrefix=com.mycompany.myapp");
-            log("*");
-            log("*****************************************************************");
+            logWarn("*****************************************************************");
+            logWarn("*");
+            logWarn("* Isis JRebel Plugin is ***DISABLED***");
+            logWarn("*");
+            logWarn("* specify package prefix through system property, eg:");
+            logWarn("*   -Disis-jrebel-plugin.packagePrefix=com.mycompany.myapp");
+            logWarn("*");
+            logWarn("*****************************************************************");
             return false;
         }
 
         if (classResourceSource.getClassResource("org.apache.isis.core.runtime.system.context.IsisContext") == null) {
-            log("Isis JRebel Plugin ignored, Isis framework classes not found");
+            logDebug("Isis JRebel Plugin ignored, Isis framework classes not found");
             return false;
         }
 
-        log("*****************************************************************");
-        log("*");
-        log("* Isis JRebel Plugin is ENABLED");
-        log("*");
-        log("* reloading classes under " + packagePrefix);
-        log("*");
-        log("*****************************************************************");
+        logInfo("*****************************************************************");
+        logInfo("*");
+        logInfo("* Isis JRebel Plugin is ENABLED");
+        logInfo("*");
+        logInfo("* reloading classes under " + packagePrefix);
+        logInfo("*");
+        logInfo("*****************************************************************");
         return (metDependencies = true);
     }
 
@@ -87,7 +96,8 @@ public class IsisJRebelPlugin implements Plugin {
         // necessary to do again (as well as in checkDependencies) because
         // JRebel seems to instantiate the plugin twice, once to do the check,
         // second to actually initialize.
-        packagePrefix = System.getProperty("isis-jrebel-plugin.packagePrefix");
+        packagePrefix = System.getProperty(D_PACKAGE_PREFIX);
+        initLogging();
 
         Integration i = IntegrationFactory.getInstance();
         ClassLoader cl = IsisJRebelPlugin.class.getClassLoader();
@@ -96,7 +106,17 @@ public class IsisJRebelPlugin implements Plugin {
 
         ReloaderFactory.getInstance().addClassLoadListener(newClassLoadListener());
         ReloaderFactory.getInstance().addClassReloadListener(newClassReloadListener());
+    }
 
+    private void initLogging() {
+        String loggingLevelStr = System.getProperty(D_LOGGING_LEVEL);
+        this.loggingLevel = LoggingLevel.INFO;
+        if("debug".equalsIgnoreCase(loggingLevelStr)) {
+            this.loggingLevel=LoggingLevel.DEBUG;
+        }
+        if("warn".equalsIgnoreCase(loggingLevelStr)) {
+            this.loggingLevel=LoggingLevel.WARN;
+        }
     }
 
     // prevent infinite loop
@@ -131,25 +151,25 @@ public class IsisJRebelPlugin implements Plugin {
                     return bytecode;
                 }
 
-                log("processing: " + className);
+                logDebug("processing: " + className);
                 CtClass ctClass = asCtClass(cl, className, bytecode);
 
                 
                 boolean persistenceCapable = isPersistenceCapable(ctClass);
-                log("  determining whether bytecode represents a persistence-capable entity...");
+                logDebug("  determining whether bytecode represents a persistence-capable entity...");
                 if (!persistenceCapable) {
-                    log("    not persistence-capable entity, skipping");
+                    logDebug("    not persistence-capable entity, skipping");
                     return bytecode;
                 }
 
                 // figure out if this bytecode has been enhanced
-                log("  determining whether bytecode has been enhanced...");
+                logDebug("  determining whether bytecode has been enhanced...");
                 boolean enhanced = isEnhanced(ctClass);
 
                 
                 // enhance ...
                 if (!enhanced) {
-                    log("    not enhanced");
+                    logDebug("    not enhanced");
 
                     // ignore any unenhanced bytecode, and just use
                     // the previous (enhanced) bytecode previous seen.
@@ -160,11 +180,25 @@ public class IsisJRebelPlugin implements Plugin {
                     // that the Eclipse compiler finished its compilation (ie eagerly), and that the follow-up load with
                     // enhanced bytes occurred when the object was interacted with (ie lazily).  So, depending on
                     // user action, there could be several seconds (even minutes) gap between the two calls.
-                    log("      using previous (enhanced) bytecode");
-                    bytecode = bytecodeByClassName.get(className);
-                    
+                    logDebug("      using previous (enhanced) bytecode");
+                    byte[] previousBytecode = bytecodeByClassName.get(className);
+
+                    if(previousBytecode == null) {
+                        logWarn("*****************************************************************");
+                        logWarn("*");
+                        logWarn("* Loaded an unenhanced class, no enhanced class available");
+                        logWarn("*");
+                        logWarn("* class: " + className);
+                        logWarn("*");
+                        logWarn("* Did you run the JDO enhancer?");
+                        logWarn("*");
+                        logWarn("*****************************************************************");
+                    } else {
+                        bytecode = previousBytecode;
+                    }
+
                 } else {
-                    log("    enhanced");
+                    logDebug("    enhanced");
 
                     // the bytecode we have represents an enhanced class, so cache it 
                     // so can use it in future if this class is ever reloaded in an unenhanced form
@@ -175,7 +209,7 @@ public class IsisJRebelPlugin implements Plugin {
                     // it's possible that the user will get an exception due to the mismatch
                     // between the enhanced class and the existing metadata; but this is transient.
                     // The developer should simply ignore and continue
-                    log("      forcing recreation of PMF next time");
+                    logDebug("      forcing recreation of PMF next time");
                     DataNucleusApplicationComponents.markAsStale();
                 }
 
@@ -185,12 +219,12 @@ public class IsisJRebelPlugin implements Plugin {
         };
     }
 
-    private static boolean isPersistenceCapable(CtClass ctClass) throws ClassNotFoundException {
-        log("  annotations:");
+    private boolean isPersistenceCapable(CtClass ctClass) throws ClassNotFoundException {
+        logDebug("  annotations:");
         Object[] annotations = ctClass.getAnnotations();
         boolean persistenceCapable = false;
         for (Object annotation : annotations) {
-            log("  - " + annotation);
+            logDebug("  - " + annotation);
             if (annotation.toString().contains("@javax.jdo.annotations.PersistenceCapable")) {
                 persistenceCapable = true;
             }
@@ -198,13 +232,13 @@ public class IsisJRebelPlugin implements Plugin {
         return persistenceCapable;
     }
 
-    private static boolean isEnhanced(CtClass ctClass) throws NotFoundException {
+    private boolean isEnhanced(CtClass ctClass) throws NotFoundException {
         CtClass[] interfaces = ctClass.getInterfaces();
         boolean enhanced = false;
-        log("    implements interfaces:");
+        logDebug("    implements interfaces:");
         if (interfaces != null) {
             for (CtClass ifc : interfaces) {
-                log("    - " + ifc.getName());
+                logDebug("    - " + ifc.getName());
                 if ("javax.jdo.spi.PersistenceCapable".equals(ifc.getName())) {
                     enhanced = true;
                 }
@@ -268,13 +302,13 @@ public class IsisJRebelPlugin implements Plugin {
             return;
         }
 
-        log(msg + klass.getName());
+        logDebug(msg + klass.getName());
 
-        log("  removing Isis metadata: " + className);
+        logDebug("  removing Isis metadata: " + className);
         if (org.apache.isis.core.runtime.system.context.IsisContext.exists()) {
             org.apache.isis.core.runtime.system.context.IsisContext.getSpecificationLoader().invalidateCache(klass);
         } else {
-            log("    skipping, Isis metamodel not yet available");
+            logDebug("    skipping, Isis metamodel not yet available");
         }
 
     }
@@ -283,11 +317,50 @@ public class IsisJRebelPlugin implements Plugin {
         return packagePrefix != null && className.startsWith(packagePrefix);
     }
 
-    private static void log(String msg) {
-        LoggerFactory.getInstance().log(msg);
-        System.err.println(msg);
+    // //////////////////////////////////////
+    
+    private void logDebug(String msg) {
+        log(LoggingLevel.DEBUG, msg);
     }
 
+    private void logInfo(String msg) {
+        log(LoggingLevel.INFO, msg);
+    }
+    
+    private void logWarn(String msg) {
+        log(LoggingLevel.WARN, msg);
+    }
+    
+    private void log(LoggingLevel level, String msg) {
+        // warn
+        if(level == LoggingLevel.WARN) {
+            LoggerFactory.getInstance().log(msg);
+            System.err.println(msg);
+        }
+        if(loggingLevel == LoggingLevel.WARN) {
+            return;
+        }
+
+        // info
+        if(level == LoggingLevel.INFO) {
+            LoggerFactory.getInstance().log(msg);
+            System.out.println(msg);
+        }
+        if(loggingLevel == LoggingLevel.INFO) {
+            return;
+        }
+
+        // debug
+        if(level == LoggingLevel.DEBUG) {
+            LoggerFactory.getInstance().trace(msg);
+        }
+        if(loggingLevel == LoggingLevel.DEBUG) {
+            return;
+        }
+    }
+
+    // //////////////////////////////////////
+    
     public String getId() {
         return "isis-jrebel-plugin";
     }
