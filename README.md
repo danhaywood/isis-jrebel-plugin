@@ -3,7 +3,13 @@ isis-jrebel-plugin
 
 This is a plugin for [Apache Isis](http://isis.apache.org) plugin for [JRebel](http://zeroturnaround.com/software/jrebel/).  By configuring it you can develop your Isis application without having to restart the app.
 
-This plugin assumes you are using the Isis with the [JDO (DataNucleus) objectstore](http://isis.apache.org/components/objectstores/jdo/about.html), and either the [Wicket viewer](http://isis.apache.org/components/viewers/wicket/about.html) or the [Restful Objects viewer](http://isis.apache.org/components/viewers/restfulobjects/about.html).
+The plugin is designed for Isis configured with the [JDO (DataNucleus) objectstore](http://isis.apache.org/components/objectstores/jdo/about.html), and either the [Wicket viewer](http://isis.apache.org/components/viewers/wicket/about.html) or the [Restful Objects viewer](http://isis.apache.org/components/viewers/restfulobjects/about.html).
+
+## Screencast
+
+You can a demo of the Isis and JRebel together in this screencast:
+
+<iframe width="560" height="315" src="//www.youtube.com/embed/PxVgbz3ae_g" frameborder="0" allowfullscreen></iframe>
 
 ## Usage notes
 
@@ -19,6 +25,7 @@ However, do be aware that:
 
 * new properties of persistent domain objects must be marked as optional (`@Column(allowNulls="true")`
   * it might be possible to specify a JDO [default](http://www.datanucleus.org/products/accessplatform_3_2/jdo/orm/schema_mapping.html#nullsdefaults) [clause](http://www.datanucleus.org/products/accessplatform_3_2/jdo/annotations.html#Column) to circumvent this; not yet tested.
+
 
 
 ## Prerequisites
