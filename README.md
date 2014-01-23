@@ -7,9 +7,7 @@ The plugin is designed for Isis configured with the [JDO (DataNucleus) objectsto
 
 ## Screencast
 
-You can a demo of the Isis and JRebel together in this screencast:
-
-<iframe width="560" height="315" src="//www.youtube.com/embed/PxVgbz3ae_g" frameborder="0" allowfullscreen></iframe>
+You can a demo of the Isis and JRebel working together in [this screencast](https://www.youtube.com/watch?v=PxVgbz3ae_g).
 
 ## Usage notes
 
