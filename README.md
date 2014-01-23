@@ -22,7 +22,7 @@ However, do be aware that:
 * on occasion when using your app you may get an exception on the interaction that causes the domain class(es) to reload.  This is caused by a temporary mismatch between the loaded class and the JDO metadata.  However, things should correct themselves for the subsequent requests, so you can simply ignore the exception and carry on.
 
 * new properties of persistent domain objects must be marked as optional (`@Column(allowNulls="true")`
-  * it might be possible to specify a JDO [default](http://www.datanucleus.org/products/accessplatform_3_2/jdo/orm/schema_mapping.html#nullsdefaults) [clause](http://www.datanucleus.org/products/accessplatform_3_2/jdo/annotations.html#Column) to circumvent this; not yet tested.
+  * or, you can make the column mandatory so long as you also specify a [default clause](http://www.datanucleus.org/products/accessplatform_3_2/jdo/orm/schema_mapping.html#nullsdefaults) ([annotation](http://www.datanucleus.org/products/accessplatform_3_2/jdo/annotations.html#Column) here).
 
 
 
@@ -98,3 +98,10 @@ Alternatively, copy one of the example `Xxx-PROTOTYPE-no-fixtures.launch` files 
           value="${jrebel_args} -Drebel.log=false -Drebel.plugins=c:/github/danhaywood/isis-jrebel-plugin/target/danhaywood-isis-jrebel-plugin-1.0.0-SNAPSHOT.jar -Disis-jrebel-plugin.packagePrefix=dom.simple"/>
 
 (adjusting the location of the JAR file, and the package prefix as necessary)
+
+
+## Disable IDE hot-code replace warnings
+
+As per JRebel's documentation, it's also a good idea to disable any warnings that your IDE might generate about hot-code replacement failing.  For example, in Eclipse this is done through *Windows>Preferences*:
+
+![](https://raw2.github.com/danhaywood/isis-jrebel-plugin/master/docs/images/disable-hot-code-replace.png)

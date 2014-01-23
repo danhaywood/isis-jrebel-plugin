@@ -25,7 +25,6 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
-import org.datanucleus.metadata.MetaDataManager;
 import org.zeroturnaround.bundled.javassist.ByteArrayClassPath;
 import org.zeroturnaround.bundled.javassist.ClassPath;
 import org.zeroturnaround.bundled.javassist.ClassPool;
