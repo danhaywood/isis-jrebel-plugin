@@ -19,8 +19,11 @@ package com.danhaywood.isis.tool.jrebelplugin;
 
 import java.io.InputStream;
 import java.net.URL;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 import org.datanucleus.metadata.MetaDataManager;
 import org.zeroturnaround.bundled.javassist.ByteArrayClassPath;
@@ -50,12 +53,51 @@ public class IsisJRebelPlugin implements Plugin {
     private static final String D_PACKAGE_PREFIX = ISIS_JREBEL_PLUGIN + "packagePrefix";
     private static final String D_LOGGING_LEVEL = ISIS_JREBEL_PLUGIN + "loggingLevel";
 
-    private final Map<String, byte[]> bytecodeByClassName = new HashMap<String, byte[]>();
+    private final Map<String, byte[]> enhancedBytecodeByClassName = new HashMap<String, byte[]>();
+    private final Map<String, Boolean> persistabilityByClassName = new HashMap<String, Boolean>();
 
     private String packagePrefix;
     private LoggingLevel loggingLevel = LoggingLevel.INFO;
 
+    
+    /**
+     * {@link #checkDependencies(ClassLoader, ClassResourceSource)} seems to get called twice, with different
+     * classpaths.  If we return true first, time, then this flag tells us to keep returning true thereafter.
+     */
     private boolean metDependencies = false;
+
+
+    // //////////////////////////////////////
+
+    public String getId() {
+        return "isis-jrebel-plugin";
+    }
+
+    public String getName() {
+        return "Isis JRebel Plugin";
+    }
+
+    public String getDescription() {
+        return "Reload Isis and JDO metadata";
+    }
+
+    public String getAuthor() {
+        return "Dan Haywood";
+    }
+
+    public String getWebsite() {
+        return "https://github.com/danhaywood/isis-jrebel-plugin";
+    }
+
+    public String getSupportedVersions() {
+        return null;
+    }
+
+    public String getTestedVersions() {
+        return null;
+    }
+    
+    // //////////////////////////////////////
 
     public boolean checkDependencies(ClassLoader classLoader, ClassResourceSource classResourceSource) {
 
@@ -64,6 +106,7 @@ public class IsisJRebelPlugin implements Plugin {
         }
 
         packagePrefix = System.getProperty(D_PACKAGE_PREFIX);
+        initLogging();
         if (packagePrefix == null) {
             logWarn("*****************************************************************");
             logWarn("*");
@@ -85,7 +128,8 @@ public class IsisJRebelPlugin implements Plugin {
         logInfo("*");
         logInfo("* Isis JRebel Plugin is ENABLED");
         logInfo("*");
-        logInfo("* reloading classes under " + packagePrefix);
+        logInfo("* reloading classes under: " + packagePrefix);
+        logInfo("* loggingLevel           : " + this.loggingLevel);
         logInfo("*");
         logInfo("*****************************************************************");
         return (metDependencies = true);
@@ -103,8 +147,7 @@ public class IsisJRebelPlugin implements Plugin {
         ClassLoader cl = IsisJRebelPlugin.class.getClassLoader();
 
         i.addIntegrationProcessor(cl, newIntegrationProcessor());
-
-        ReloaderFactory.getInstance().addClassLoadListener(newClassLoadListener());
+        
         ReloaderFactory.getInstance().addClassReloadListener(newClassReloadListener());
     }
 
@@ -121,11 +164,15 @@ public class IsisJRebelPlugin implements Plugin {
 
     // prevent infinite loop
     boolean processing = false;
-    // ensure single-threaded
     private Object threadSafety = new Object();
+
+    
+    private Set<String> isisClassNames = new LinkedHashSet<String>();
+
 
     private ClassBytecodeProcessor newIntegrationProcessor() {
         return new ClassBytecodeProcessor() {
+
 
             public byte[] process(ClassLoader cl, String className, byte[] bytecode) {
                 synchronized (threadSafety) {
@@ -151,23 +198,50 @@ public class IsisJRebelPlugin implements Plugin {
                     return bytecode;
                 }
 
+                
+                // if already encountered class and know it to be non-persistent, then just skip
+                Boolean persistability = persistabilityByClassName.get(className);
+                if(persistability != null && !persistability.booleanValue()) {
+                    return bytecode;
+                }
+                
+                
                 logDebug("processing: " + className);
-                CtClass ctClass = asCtClass(cl, className, bytecode);
 
                 
-                boolean persistenceCapable = isPersistenceCapable(ctClass);
+                // if the developer has manually rerun the JDO Enhancer, then
+                // all bytecode is reloaded, even though there's no difference to last time.
+                // in which case, just skip further processing
+                byte[] previousBytecode = enhancedBytecodeByClassName.get(className);
+                if(arraysEquals(bytecode, previousBytecode)) {
+                    logDebug("  No difference in bytecode from previous, so skipping");
+                    return bytecode;
+                }
+
+
+                
+                // ok, we have got some bytecode that either is for newly changed persistable class, 
+                // or for a non-persistable class.   Need to figure out which
                 logDebug("  determining whether bytecode represents a persistence-capable entity...");
-                if (!persistenceCapable) {
+                
+                CtClass ctClass = asCtClass(cl, className, bytecode);
+                persistability = isPersistenceCapable(ctClass);
+                
+                // cache for next time
+                persistabilityByClassName.put(className, persistability);
+
+                if (!persistability) {
                     logDebug("    not persistence-capable entity, skipping");
                     return bytecode;
                 }
 
-                // figure out if this bytecode has been enhanced
+
+                
+                // figure out if the bytecode of this persistence-capable class has been enhanced
                 logDebug("  determining whether bytecode has been enhanced...");
                 boolean enhanced = isEnhanced(ctClass);
 
-                
-                // enhance ...
+
                 if (!enhanced) {
                     logDebug("    not enhanced");
 
@@ -181,7 +255,6 @@ public class IsisJRebelPlugin implements Plugin {
                     // enhanced bytes occurred when the object was interacted with (ie lazily).  So, depending on
                     // user action, there could be several seconds (even minutes) gap between the two calls.
                     logDebug("      using previous (enhanced) bytecode");
-                    byte[] previousBytecode = bytecodeByClassName.get(className);
 
                     if(previousBytecode == null) {
                         logWarn("*****************************************************************");
@@ -203,30 +276,82 @@ public class IsisJRebelPlugin implements Plugin {
                     // the bytecode we have represents an enhanced class, so cache it 
                     // so can use it in future if this class is ever reloaded in an unenhanced form
                     // (ie the other branch of this if statement)
-                    bytecodeByClassName.put(className, bytecode);
+                    enhancedBytecodeByClassName.put(className, bytecode);
 
-                    // throw away existing PMF
-                    // it's possible that the user will get an exception due to the mismatch
-                    // between the enhanced class and the existing metadata; but this is transient.
-                    // The developer should simply ignore and continue
-                    logDebug("      forcing recreation of PMF next time");
-                    DataNucleusApplicationComponents.markAsStale();
+                    if(isIsisAvailable()) {
+                        logDebug("      queueing class to recache in Isis: " + className);
+                        queueIsisRecaching(className);
+    
+                        // throw away existing PMF
+                        // it's possible that the user will get an exception due to the mismatch
+                        // between the enhanced class and the existing metadata; but this is transient.
+                        // The developer should simply ignore and continue
+                        logDebug("      forcing recreation of PMF next time");
+                        DataNucleusApplicationComponents.markAsStale();
+                    }
                 }
-
                 return bytecode;
             }
 
         };
     }
+    
+    private static boolean arraysEquals(byte[] a, byte[] b) {
+        return a != null && b != null && a.length == b.length && Arrays.equals(a, b);
+    }
+
+    private void queueIsisRecaching(String className) {
+        synchronized (threadSafety) {
+            isisClassNames.add(className);
+        }
+    }
+    
+    private boolean dequeueIsisRecaching(String className) {
+        synchronized (threadSafety) {
+            return isisClassNames.remove(className);
+        }
+    }
+    
+    private ClassEventListener newClassReloadListener() {
+        return new ClassEventListener() {
+            @SuppressWarnings("rawtypes")
+            public void onClassEvent(int eventType, Class klass) {
+                updateIsisMetadataIfRequired("reloading: ", klass);
+            }
+
+            public int priority() {
+                return 0;
+            }
+        };
+    }
+
+    @SuppressWarnings("rawtypes")
+    private void updateIsisMetadataIfRequired(String msg, Class klass) {
+
+        final String className = klass.getName();
+        synchronized (threadSafety) {
+            if(dequeueIsisRecaching(className)) {
+                logDebug("  " +  msg + ": recaching in Isis: " + className);
+                org.apache.isis.core.runtime.system.context.IsisContext.getSpecificationLoader().invalidateCache(klass);
+            }
+        }
+    }
+
+    private static boolean isIsisAvailable() {
+        return org.apache.isis.core.runtime.system.context.IsisContext.exists() && 
+               org.apache.isis.core.runtime.system.context.IsisContext.getSpecificationLoader() != null && 
+               org.apache.isis.core.runtime.system.context.IsisContext.getSpecificationLoader().isInitialized();
+    }
 
     private boolean isPersistenceCapable(CtClass ctClass) throws ClassNotFoundException {
-        logDebug("  annotations:");
+        //logDebug("  annotations:");
         Object[] annotations = ctClass.getAnnotations();
         boolean persistenceCapable = false;
         for (Object annotation : annotations) {
-            logDebug("  - " + annotation);
+            //logDebug("  - " + annotation);
             if (annotation.toString().contains("@javax.jdo.annotations.PersistenceCapable")) {
                 persistenceCapable = true;
+                return true;
             }
         }
         return persistenceCapable;
@@ -235,12 +360,12 @@ public class IsisJRebelPlugin implements Plugin {
     private boolean isEnhanced(CtClass ctClass) throws NotFoundException {
         CtClass[] interfaces = ctClass.getInterfaces();
         boolean enhanced = false;
-        logDebug("    implements interfaces:");
+        //logDebug("    implements interfaces:");
         if (interfaces != null) {
             for (CtClass ifc : interfaces) {
-                logDebug("    - " + ifc.getName());
+                //logDebug("    - " + ifc.getName());
                 if ("javax.jdo.spi.PersistenceCapable".equals(ifc.getName())) {
-                    enhanced = true;
+                    return true;
                 }
             }
         }
@@ -267,51 +392,6 @@ public class IsisJRebelPlugin implements Plugin {
         return ctClass;
     }
     
-    private ClassEventListener newClassLoadListener() {
-        return new ClassEventListener() {
-
-            @SuppressWarnings("rawtypes")
-            public void onClassEvent(int eventType, Class klass) {
-                updateIsisMetadata("loading: ", klass);
-            }
-
-            public int priority() {
-                return 0;
-            }
-        };
-    }
-
-    private ClassEventListener newClassReloadListener() {
-        return new ClassEventListener() {
-            @SuppressWarnings("rawtypes")
-            public void onClassEvent(int eventType, Class klass) {
-                updateIsisMetadata("reloading: ", klass);
-            }
-
-            public int priority() {
-                return 0;
-            }
-        };
-    }
-
-    @SuppressWarnings("rawtypes")
-    private void updateIsisMetadata(String msg, Class klass) {
-
-        final String className = klass.getName();
-        if (!underPackage(className)) {
-            return;
-        }
-
-        logDebug(msg + klass.getName());
-
-        logDebug("  removing Isis metadata: " + className);
-        if (org.apache.isis.core.runtime.system.context.IsisContext.exists()) {
-            org.apache.isis.core.runtime.system.context.IsisContext.getSpecificationLoader().invalidateCache(klass);
-        } else {
-            logDebug("    skipping, Isis metamodel not yet available");
-        }
-
-    }
 
     private boolean underPackage(String className) {
         return packagePrefix != null && className.startsWith(packagePrefix);
@@ -335,7 +415,7 @@ public class IsisJRebelPlugin implements Plugin {
         // warn
         if(level == LoggingLevel.WARN) {
             LoggerFactory.getInstance().log(msg);
-            System.err.println(msg);
+            System.err.println("WARN: " + msg);
         }
         if(loggingLevel == LoggingLevel.WARN) {
             return;
@@ -344,7 +424,7 @@ public class IsisJRebelPlugin implements Plugin {
         // info
         if(level == LoggingLevel.INFO) {
             LoggerFactory.getInstance().log(msg);
-            System.out.println(msg);
+            System.err.println("INFO: " + msg);
         }
         if(loggingLevel == LoggingLevel.INFO) {
             return;
@@ -353,39 +433,12 @@ public class IsisJRebelPlugin implements Plugin {
         // debug
         if(level == LoggingLevel.DEBUG) {
             LoggerFactory.getInstance().trace(msg);
+            System.err.println("DEBUG: " + msg);
         }
         if(loggingLevel == LoggingLevel.DEBUG) {
             return;
         }
     }
 
-    // //////////////////////////////////////
-    
-    public String getId() {
-        return "isis-jrebel-plugin";
-    }
 
-    public String getName() {
-        return "Isis JRebel Plugin";
-    }
-
-    public String getDescription() {
-        return "Reload Isis and JDO metadata";
-    }
-
-    public String getAuthor() {
-        return null;
-    }
-
-    public String getWebsite() {
-        return null;
-    }
-
-    public String getSupportedVersions() {
-        return null;
-    }
-
-    public String getTestedVersions() {
-        return null;
-    }
 }
