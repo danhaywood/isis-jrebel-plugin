@@ -81,6 +81,11 @@ To dissect this:
 
 Obviously, you should adjust the location of the JAR file, and the package prefix as necessary.
 
+You might also want to increase the (infamous) `MaxPermSize`; add:
+
+* `-XX:MaxPermSize=128m`
+
+or some other, higher, figure.
 
 ### JRebel tab
 
@@ -95,9 +100,9 @@ Alternatively, copy one of the example `Xxx-PROTOTYPE-no-fixtures.launch` files 
 
     <stringAttribute 
           key="org.eclipse.jdt.launching.VM_ARGUMENTS" 
-          value="${jrebel_args} -Drebel.log=false -Drebel.plugins=c:/github/danhaywood/isis-jrebel-plugin/target/danhaywood-isis-jrebel-plugin-1.0.0-SNAPSHOT.jar -Disis-jrebel-plugin.packagePrefix=dom.simple"/>
+          value="${jrebel_args} -Drebel.log=false -Drebel.plugins=c:/github/danhaywood/isis-jrebel-plugin/target/danhaywood-isis-jrebel-plugin-1.0.0-SNAPSHOT.jar -Disis-jrebel-plugin.packagePrefix=dom.simple -XX:MaxPermSize=128m"/>
 
-(adjusting the location of the JAR file, and the package prefix as necessary)
+(adjusting the location of the JAR file, the package prefix, and the `MaxPermSize` as necessary)
 
 
 ## Disable IDE hot-code replace warnings
