@@ -77,7 +77,7 @@ To dissect this:
 
 * `-Drebel.plugins` points to this plugin
 
-* `-Disis-jrebel-plugin.packagePrefix` argument tells this plugin to ignore all packages except that specified; set it to the parent package for all your domain object classes.
+* `-Disis-jrebel-plugin.packagePrefix` argument tells this plugin to ignore all packages except that specified; set it to the parent package for all your domain object classes.  If your code is in more than one package, specify the argument as a comma-separated list of packages.
 
 Obviously, you should adjust the location of the JAR file, and the package prefix as necessary.
 

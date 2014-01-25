@@ -25,6 +25,11 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
+import com.google.common.base.Function;
+import com.google.common.base.Splitter;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Sets;
+
 import org.zeroturnaround.bundled.javassist.ByteArrayClassPath;
 import org.zeroturnaround.bundled.javassist.ClassPath;
 import org.zeroturnaround.bundled.javassist.ClassPool;
@@ -55,7 +60,7 @@ public class IsisJRebelPlugin implements Plugin {
     private final Map<String, byte[]> enhancedBytecodeByClassName = new HashMap<String, byte[]>();
     private final Map<String, Boolean> persistabilityByClassName = new HashMap<String, Boolean>();
 
-    private String packagePrefix;
+    private Set<String> packagePrefix;
     private LoggingLevel loggingLevel = LoggingLevel.INFO;
 
     
@@ -104,7 +109,7 @@ public class IsisJRebelPlugin implements Plugin {
             return metDependencies;
         }
 
-        packagePrefix = System.getProperty(D_PACKAGE_PREFIX);
+        String packagePrefix = System.getProperty(D_PACKAGE_PREFIX);
         initLogging();
         if (packagePrefix == null) {
             logWarn("*****************************************************************");
@@ -139,7 +144,7 @@ public class IsisJRebelPlugin implements Plugin {
         // necessary to do again (as well as in checkDependencies) because
         // JRebel seems to instantiate the plugin twice, once to do the check,
         // second to actually initialize.
-        packagePrefix = System.getProperty(D_PACKAGE_PREFIX);
+        packagePrefix = parseCommaSeparated(System.getProperty(D_PACKAGE_PREFIX));
         initLogging();
 
         Integration i = IntegrationFactory.getInstance();
@@ -148,6 +153,16 @@ public class IsisJRebelPlugin implements Plugin {
         i.addIntegrationProcessor(cl, newIntegrationProcessor());
         
         ReloaderFactory.getInstance().addClassReloadListener(newClassReloadListener());
+    }
+
+    private static Set<String> parseCommaSeparated(String str) {
+        Iterable<String> split = Splitter.on(",").split(str);
+        Iterable<String> trimmed = Iterables.transform(split, new Function<String,String>() {
+
+            public String apply(String input) {
+                return input.trim();
+            }});
+        return Sets.newLinkedHashSet(trimmed);
     }
 
     private void initLogging() {
@@ -393,7 +408,12 @@ public class IsisJRebelPlugin implements Plugin {
     
 
     private boolean underPackage(String className) {
-        return packagePrefix != null && className.startsWith(packagePrefix);
+        for (String prefix : packagePrefix) {
+            if(className.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // //////////////////////////////////////
