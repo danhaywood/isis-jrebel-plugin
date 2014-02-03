@@ -77,9 +77,13 @@ To dissect this:
 
 * `-Drebel.plugins` points to this plugin
 
+    Obviously, you should adjust the location of the JAR file, and the package prefix as necessary.
+
 * `-Disis-jrebel-plugin.packagePrefix` argument tells this plugin to ignore all packages except that specified; set it to the parent package for all your domain object classes.  If your code is in more than one package, specify the argument as a comma-separated list of packages.
 
-Obviously, you should adjust the location of the JAR file, and the package prefix as necessary.
+
+* `-Disis-jrebel-plugin.loggingLevel` argument tells this plugin how much logging to emit; valid values are `DEBUG`, `INFO` and `WARN`.
+
 
 You might also want to increase the (infamous) `MaxPermSize`; add:
 
@@ -100,7 +104,7 @@ Alternatively, copy one of the example `Xxx-PROTOTYPE-no-fixtures.launch` files 
 
     <stringAttribute 
           key="org.eclipse.jdt.launching.VM_ARGUMENTS" 
-          value="${jrebel_args} -Drebel.log=false -Drebel.plugins=c:/github/danhaywood/isis-jrebel-plugin/target/danhaywood-isis-jrebel-plugin-1.0.0-SNAPSHOT.jar -Disis-jrebel-plugin.packagePrefix=dom.simple -XX:MaxPermSize=128m"/>
+          value="${jrebel_args} -Drebel.log=false -Drebel.plugins=c:/github/danhaywood/isis-jrebel-plugin/target/danhaywood-isis-jrebel-plugin-1.0.0-SNAPSHOT.jar -Disis-jrebel-plugin.packagePrefix=dom.simple -Disis-jrebel-plugin.loggingLevel=warn -XX:MaxPermSize=128m"/>
 
 (adjusting the location of the JAR file, the package prefix, and the `MaxPermSize` as necessary)
 
