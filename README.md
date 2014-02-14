@@ -1,7 +1,7 @@
 isis-jrebel-plugin
 ==================
 
-This is a plugin for [Apache Isis](http://isis.apache.org) plugin for [JRebel](http://zeroturnaround.com/software/jrebel/).  By configuring it you can develop your Isis application without having to restart the app.
+This is a plugin for [Apache Isis](http://isis.apache.org) plugin for [JRebel](http://zeroturnaround.com/software/jrebel/).  By configuring it you can develop your Isis application without having to restart the app.  You do need to run Isis in [prototype mode](http://isis.apache.org/reference/deployment-type.html).
 
 The plugin is designed for Isis configured with the [JDO (DataNucleus) objectstore](http://isis.apache.org/components/objectstores/jdo/about.html), and either the [Wicket viewer](http://isis.apache.org/components/viewers/wicket/about.html) or the [Restful Objects viewer](http://isis.apache.org/components/viewers/restfulobjects/about.html).
 
@@ -66,6 +66,8 @@ No changes required to the main tab:
 
 The only change required is to the JVM arguments section on the arguments tab:
 
+> **For further JRebel settings, see the [JRebel manual](http://manuals.zeroturnaround.com/jrebel/misc/index.html#agent-settings)**
+
 ![](https://raw2.github.com/danhaywood/isis-jrebel-plugin/master/docs/images/eclipse-run-config-2.png)
 
 
@@ -75,12 +77,15 @@ To dissect this:
 
 * `-Drebel.log` tells JRebel whether to write to its log or not
 
+* `-Drebel.packages_exclude=org.apache.isis.core` tells JRebel to ignore any Isis framework classes
+
+* `-Drebel.check_class_hash=true` is a performance optimization telling JRebel to not reload classes if the timestamp has changed but its content has not 
+
 * `-Drebel.plugins` points to this plugin
 
     Obviously, you should adjust the location of the JAR file, and the package prefix as necessary.
 
 * `-Disis-jrebel-plugin.packagePrefix` argument tells this plugin to ignore all packages except that specified; set it to the parent package for all your domain object classes.  If your code is in more than one package, specify the argument as a comma-separated list of packages.
-
 
 * `-Disis-jrebel-plugin.loggingLevel` argument tells this plugin how much logging to emit; valid values are `DEBUG`, `INFO` and `WARN`.
 
@@ -91,6 +96,7 @@ You might also want to increase the (infamous) `MaxPermSize`; add:
 
 or some other, higher, figure.
 
+
 ### JRebel tab
 
 The JRebel tab simply reflects the -D settings on the JVM arguments section (above)
@@ -98,13 +104,13 @@ The JRebel tab simply reflects the -D settings on the JVM arguments section (abo
 ![](https://raw2.github.com/danhaywood/isis-jrebel-plugin/master/docs/images/eclipse-run-config-3.png)
 
 
-### Editing the `.launch` config file directly
+## Editing the `.launch` config file directly
 
 Alternatively, copy one of the example `Xxx-PROTOTYPE-no-fixtures.launch` files (under `ide/eclipse/launch` in the archetypes), and add:
 
     <stringAttribute 
           key="org.eclipse.jdt.launching.VM_ARGUMENTS" 
-          value="${jrebel_args} -Drebel.log=false -Drebel.plugins=c:/github/danhaywood/isis-jrebel-plugin/target/danhaywood-isis-jrebel-plugin-1.0.0-SNAPSHOT.jar -Disis-jrebel-plugin.packagePrefix=dom.simple -Disis-jrebel-plugin.loggingLevel=warn -XX:MaxPermSize=128m"/>
+          value="${jrebel_args} -Drebel.log=false -Drebel.packages_exclude=org.apache.isis.core -Drebel.check_class_hash=true -Drebel.plugins=c:/github/danhaywood/isis-jrebel-plugin/target/danhaywood-isis-jrebel-plugin-1.0.0-SNAPSHOT.jar -Disis-jrebel-plugin.packagePrefix=dom.simple -Disis-jrebel-plugin.loggingLevel=warn -XX:MaxPermSize=128m"/>
 
 (adjusting the location of the JAR file, the package prefix, and the `MaxPermSize` as necessary)
 
