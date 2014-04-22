@@ -1,6 +1,8 @@
 isis-jrebel-plugin
 ==================
 
+[![Build Status](https://travis-ci.org/danhaywood/isis-jrebel-plugin.png?branch=master)](https://travis-ci.org/danhaywood/isis-jrebel-plugin)
+
 This is a plugin for [Apache Isis](http://isis.apache.org) plugin for [JRebel](http://zeroturnaround.com/software/jrebel/).  By configuring it you can develop your Isis application without having to restart the app.  You do need to run Isis in [prototype mode](http://isis.apache.org/reference/deployment-type.html).
 
 The plugin is designed for Isis configured with the [JDO (DataNucleus) objectstore](http://isis.apache.org/components/objectstores/jdo/about.html), and either the [Wicket viewer](http://isis.apache.org/components/viewers/wicket/about.html) or the [Restful Objects viewer](http://isis.apache.org/components/viewers/restfulobjects/about.html).
